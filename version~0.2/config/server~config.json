@@ -1,0 +1,12 @@
+{
+    "localhost":"0.0.0.0",
+    "localport":45535,
+    "listen":5,
+    "bufsize":65535,
+    "maxconnection":50,
+    "encoding":"utf-8",
+    "admin":{
+        "admin_account":"yours-account",
+        "admin_password":"yours-password"
+    }
+}

@@ -1,0 +1,11 @@
+{
+    "localhost":"0.0.0.0",
+    "localport":45535,
+    "listen":5,
+    "bufsize":65535,
+    "maxconnection":50,
+    "admin":{
+        "admin_account":"test-project-cde21%hf&[",
+        "admin_password":"test-project-oi*7!$#"
+    }
+}

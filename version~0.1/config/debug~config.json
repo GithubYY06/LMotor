@@ -1,0 +1,10 @@
+{
+    "localhost":"127.0.0.1",
+    "localport":45535,
+    "timeout":5,
+    "listen":5,
+    "admin":{
+        "admin_account":"test-project-cde21%hf&[",
+        "admin_password":"test-project-oi*7!$#"
+    }
+}
