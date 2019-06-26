@@ -1,0 +1,3 @@
+[ERROR] 2019-6-26 13:6:40 at LMManager.working():unknown error happened at manager main loop:[WinError 10053] 你的主机中的软件中止了一个已建立的连接。,<class 'ConnectionAbortedError'>
+[ERROR] 2019-6-26 13:6:54 at LMMangaer.send_message():unknown error happened when send a message to manager:[WinError 10038] 在一个非套接字上尝试了一个操作。
+[ERROR] 2019-6-26 13:10:58 at LMManager.working():unknown error happened at manager main loop:[WinError 10053] 你的主机中的软件中止了一个已建立的连接。,<class 'ConnectionAbortedError'>

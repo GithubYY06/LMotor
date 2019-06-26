@@ -171,12 +171,12 @@ class LMClient(_thread_prototype):
 class LMManager(_thread_prototype):
     '''管理员类,服务器的支线类,用于辅助管理员控制服务器'''
 
-    def __init__(self,server,debug=False):
+    def __init__(self,server,remote_sock,debug=False):
         '''初始化管理员'''
 
         super(LMManager,self).__init__(self,debug=debug)
         self.server = server
-        self.managersock = None
+        self.managersock = remote_sock
 
         self.valid = True
         self.valid_count = 2
@@ -184,43 +184,31 @@ class LMManager(_thread_prototype):
         # self.handler = _thread_prototype(self.handle_message,DEBUG)
 
         self.__debug = debug
+        self.server.managers.append(self)
         self.install(self.working)
-
-    def online(self):
-        '''判断管理员是否在线'''
-
-        return self.managersock != None
+        self.start()
 
     def debug(self,tip):
-        '''发送一条debug消息'''
+        '''debug消息'''
 
         if self.__debug:print(tip)
 
-    def set_sock(self,remote_sock):
-        '''设置一个新的管理员'''
-
-        self.debug("manager is online")
-        self.managersock = remote_sock
-        self.resume()
-        self.valid = True
-
     def clearsock(self,reason="未设置理由"):
-        '''清空管理员线程'''
+        '''清空管理员线程
+        该清空方式包含了停止线程，移除管理员'''
 
         self.debug("manager is offline")
         self.debug("本次管理员关闭是由于:{}".format(reason))
         self.time_count = 0
-        if self.managersock != None:
-            self.managersock.close()
-            self.managersock = None
-        self.pause()
+        self.managersock.close()
+        self.server.managers.remove(self)
+        self.stop()
 
     def send_message(self,info):
         '''给管理员发送一条消息'''
 
         try:
-            if self.online():
-                self.managersock.send(encryption(info.encode(LMServer.ENCODING)))
+            self.managersock.send(encryption(info.encode(LMServer.ENCODING)))
         except ConnectionResetError as e:
             self.clearsock(reason="在发送消息的时候遇到了connection_reset_error")
         except Exception as e:
@@ -231,31 +219,31 @@ class LMManager(_thread_prototype):
     def working(self):
         '''接受管理员的命令并添加到消息队列'''
 
-        if self.managersock:
-            if self.valid_count >= 0:
-                try:
-                    _message = self.managersock.recv(LMServer.BUFSIZE)                  # 获取指定大小的报文
-                    if self.online():
-                        # 这里重新判断是因为有可能因为接受信息线程的阻塞,关闭管理员的消息不能第一时间传达
-                        _text = decryption(_message)
-                        if _text:
-                            _obj = eval(_text)
-                        # print(_obj)
-                        # 管理员线程必须由普通线程晋升而来,不然此处应该设置相应的安全措施
-                            self.server.handle_admin_command(_obj)
-                        else:
-                            self.send_message(payback(MsgType.ERROR,reason="invalid message"))
-                except ConnectionResetError as e:
-                    self.debug("LMotorManager.working:",e)
-                    self.clearsock(reason="在接受管理员命令的时候遇到了connection_reset_error")
-                except json.JSONDecodeError as e:
+        if self.valid_count >= 0:
+            try:
+                _message = self.managersock.recv(LMServer.BUFSIZE)                  # 获取指定大小的报文
+                _text = decryption(_message)
+                if _text:
+                    _obj = eval(_text)
+                    # print(_obj)
+                    # 管理员线程必须由普通线程晋升而来,不然此处应该设置相应的安全措施
+                    self.server.handle_admin_command(self,_obj)
+                else:
                     self.send_message(payback(MsgType.ERROR,reason="invalid message"))
-                except Exception as e:
-                    self.debug("LMotorManager.working:" + str(e))
-                    self.clearsock(reason="在接受管理员命令的时候遇到了未知的错误:{}".format(str(e)))
-                    self.server.logger.log("unknown error happened at manager main loop:%s,%s" % (str(e),str(type(e))),LogType.ERROR,"LMManager.working()")
-            else:
-                self.clearsock(reason="在接受管理员命令的时候发现管理员已经超过三次没有回复心跳包")
+            except ConnectionResetError as e:
+                self.debug("LMotorManager.working:",e)
+                self.clearsock(reason="在接受管理员命令的时候遇到了connection_reset_error")
+            except json.JSONDecodeError as e:
+                self.send_message(payback(MsgType.ERROR,reason="invalid message"))
+            except SyntaxError as e:
+                self.debug("LMotorManager.working:" + str(e))
+                pass
+            except Exception as e:
+                self.debug("LMotorManager.working:" + str(e))
+                self.clearsock(reason="在接受管理员命令的时候遇到了未知的错误:{}".format(str(e)))
+                self.server.logger.log("unknown error happened at manager main loop:%s,%s" % (str(e),str(type(e))),LogType.ERROR,"LMManager.working()")
+        else:
+            self.clearsock(reason="在接受管理员命令的时候发现管理员已经超过三次没有回复心跳包")
 
 class LMServer(_thread_prototype):
     '''服务器主类'''
@@ -284,8 +272,7 @@ class LMServer(_thread_prototype):
         self.workers = []
         # 维护所有的客户端线程,客户端线程在workers列表中的索引即为客户端的ID号
 
-        self.manager = LMManager(self,debug=DEBUG)
-        self.manager.start()
+        self.managers = []
         # self.manager2 = LMManager(self,debug=DEBUG)
         # 维护管理员进程,管理员进程不会终止,但是在没有管理登录的时候,它不执行自己的代码
 
@@ -319,27 +306,16 @@ class LMServer(_thread_prototype):
                         else:
                             worker.valid_count -= 1
 
-                if self.manager.online():
-                    self.manager.send_message(payback(MsgType.BREATH))
-                    if self.manager.valid:
-                        self.manager.valid = False
+                for manager in self.managers:
+                    manager.send_message(payback(MsgType.BREATH))
+                    if manager.valid:
+                        manager.valid = False
                     else:
                         # self.debug('管理员端没有回复')
-                        if self.manager.valid_count < 0:
-                            self.manager.clearsock(reason="管理员超过上限次数没有回复心跳包")
+                        if manager.valid_count < 0:
+                            manager.clearsock(reason="管理员超过上限次数没有回复心跳包")
                         else:
-                            self.manager.valid_count -= 1
-            # self.manager_time_shutdown()
-
-    def manager_time_shutdown(self):
-
-        if self.manager.online():
-            if self.timer_shutdown.tick():
-                self.manager.time_count += 1
-                if self.manager.time_count == self.config.manager_time:
-                    self.debug("超越管理员可以存在的最大时间,准备关闭管理员")
-                    self.manager.clearsock(reason="超越管理员可以存在的最大时间")
-                
+                            manager.valid_count -= 1
 
     def clearclientsocks(self):
         '''清空所有的客户端线程'''
@@ -362,17 +338,18 @@ class LMServer(_thread_prototype):
         for worker in self.workers:
             worker.send_message(payback(MsgType.MSG,msg=info))
 
-    def shutdown_manager(self):
+    def shutdown_manager(self,target:LMManager):
         '''关闭当前的管理员'''
 
-        self.manager.clearsock(reason="管理员登出或者服务器重启:主动关闭")
+        # self.manager.clearsock(reason="管理员登出或者服务器重启:主动关闭")
+        target.clearsock(reason="管理员登出或者由于服务器重启")
 
     def debug(self,tip):
         '''输出到控制台的debug信息'''
 
         if self.__debug:print(tip)
 
-    def handle_admin_command(self,obj):
+    def handle_admin_command(self,manager,obj):
         '''处理管理员的命令'''
 
         _type = obj["type"]                         # 先取得管理员的命令类型
@@ -381,16 +358,16 @@ class LMServer(_thread_prototype):
 
             try:
                 self.broadcast(obj["msg"])
-                self.manager.send_message(payback(MsgType.RESULT,msg=SUCCESS))
+                manager.send_message(payback(MsgType.RESULT,msg=SUCCESS))
             except Exception as e:
-                self.manager.send_message(payback(MsgType.RESULT,msg=FAILED,reason=str(e)))
+                manager.send_message(payback(MsgType.RESULT,msg=FAILED,reason=str(e)))
                 self.logger.log("error occurred when broadcast message  %s" % str(e),LogType.ERROR,"LMServer.handle_admin_command")
 
         elif _type == ServerCommand.LOGOUT:
             # 退出当前的管理员
 
-            self.manager.send_message(payback(MsgType.RESULT,msg=SUCCESS))
-            self.shutdown_manager()
+            manager.send_message(payback(MsgType.RESULT,msg=SUCCESS))
+            self.shutdown_manager(manager)
 
         elif _type == ServerCommand.MSG:
             # 给特定的客户端发送一条消息
@@ -400,9 +377,9 @@ class LMServer(_thread_prototype):
                 _id,_message = obj["id"],obj["msg"]
                 _client_host = obj["host"]
                 self.sendto(_message,_id,_client_host)
-                self.manager.send_message(payback(MsgType.RESULT,msg=SUCCESS))
+                manager.send_message(payback(MsgType.RESULT,msg=SUCCESS))
             except Exception as e:
-                self.manager.send_message(payback(MsgType.RESULT,msg=FAILED,reason=str(e)))
+                manager.send_message(payback(MsgType.RESULT,msg=FAILED,reason=str(e)))
                 self.logger.log("error occurred when send message  %s" % str(e),LogType.ERROR,"LMServer.handle_admin_command")
 
         elif _type == ServerCommand.CLEAR:
@@ -410,9 +387,9 @@ class LMServer(_thread_prototype):
 
             try:
                 self.clearclientsocks()
-                self.manager.send_message(payback(MsgType.RESULT,msg=SUCCESS))
+                manager.send_message(payback(MsgType.RESULT,msg=SUCCESS))
             except Exception as e:
-                self.manager.send_message(payback(MsgType.RESULT,msg=FAILED,reason=str(e)))
+                manager.send_message(payback(MsgType.RESULT,msg=FAILED,reason=str(e)))
                 self.logger.log("error occurred when clear service %s" % str(e),LogType.ERROR,"LMServer.handle_admin_command")
 
         elif _type == ServerCommand.VIEW:
@@ -427,7 +404,7 @@ class LMServer(_thread_prototype):
                     "port":port
                 })
                 _id += 1
-            self.manager.send_message(payback(MsgType.RESULT,kwargs={"userlist":_Tmp}))
+            manager.send_message(payback(MsgType.RESULT,kwargs={"userlist":_Tmp}))
 
         elif _type == ServerCommand.REBOOT:
             # 重启服务器,该操作会断开所有的连接
@@ -438,18 +415,18 @@ class LMServer(_thread_prototype):
                 self.clearclientsocks()
                 self.shutdown_manager()
                 self.server_sock.close()
-                self.manager.send_message(payback(MsgType.RESULT,msg=SUCCESS))
+                manager.send_message(payback(MsgType.RESULT,msg=SUCCESS))
             except Exception as e:
-                self.manager.send_message(payback(MsgType.RESULT,msg=FAILED,reason=str(e)))
+                manager.send_message(payback(MsgType.RESULT,msg=FAILED,reason=str(e)))
                 self.logger.log("error occurred when restart server %s" % str(e),LogType.ERROR,"LMServer.handle_admin_command")
 
         elif _type == ServerCommand.BREATH:
 
-            self.manager.valid = True
-            self.manager.valid_count = 2
+            manager.valid = True
+            manager.valid_count = 2
         else:
             # 不匹配任何命令符号
-            self.manager.send_message(payback(MsgType.ERROR,msg=FAILED,reason="Unknown Command"))
+            manager.send_message(payback(MsgType.ERROR,msg=FAILED,reason="Unknown Command"))
         '''心跳包只能由服务器发送给客户端'''
 
     def handle_user_command(self,client,obj):
@@ -459,25 +436,23 @@ class LMServer(_thread_prototype):
         if obj["type"] == ServerCommand.LOGIN:
             # 客户端试图登录这个服务器成为管理员，该过程需要得到服务器本地帐号和密码的验证
 
-            if not self.manager.online():
-                acc,pwd = obj["account"],obj["password"]
-                if self.config.verify_user_login((acc,pwd)):
-                    # 确认客户端的信息没有错误之后,准许其成为管理员
+            acc,pwd = obj["account"],obj["password"]
+            if self.config.verify_user_login((acc,pwd)):
+                # 确认客户端的信息没有错误之后,准许其成为管理员
 
-                    _sock = client.get_sock()
-                    client.stop();self.workers.remove(client)
-                    self.manager.set_sock(_sock)
-                    self.manager.send_message(payback(MsgType.LOGIN,msg=SUCCESS))
-                    # print("普通客户正在登录:返回值确认",payback(MsgType.RESULT,msg=SUCCESS))
-                else:
-                    client.send_message(payback(MsgType.LOGIN,msg=FAILED,reason="invalid account or password"))
+                _sock = client.get_sock()
+                client.stop();self.workers.remove(client)
+                # self.manager.set_sock(_sock)
+                _tmp_manager = LMManager(self,_sock,debug=DEBUG)
+                _tmp_manager.send_message(payback(MsgType.LOGIN,msg=SUCCESS))
+                self.managers.append(_tmp_manager)
             else:
-                client.send_message(payback(MsgType.LOGIN,msg=FAILED,reason="manager is already online"))
+                client.send_message(payback(MsgType.LOGIN,msg=FAILED,reason="invalid account or password"))
 
         elif obj["type"] == ServerCommand.STATUS:
             # 客户端试图取得服务器状态，直接返回
             
-            _status_obj = {"clients_number":len(self.workers),"is_command_online":self.manager.online()}
+            _status_obj = {"clients_number":len(self.workers),"managers_number":len(self.managers)}
             client.send_message(payback(MsgType.RESULT,kwargs=_status_obj))
             # print("普通客户端正在请求服务器状态:返回值确认",str(_status_obj))
         elif obj["type"] == ServerCommand.BREATH:

@@ -240,3 +240,8 @@ class Logger(_thread_prototype):
     def remark(self,info):
 
         self.info_list.append(info)
+
+
+log_path = "./log"
+if not os.path.exists(log_path):
+    os.mkdir(log_path)
