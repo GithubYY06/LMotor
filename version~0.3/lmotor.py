@@ -341,8 +341,14 @@ class LMServer(_thread_prototype):
     def shutdown_manager(self,target:LMManager):
         '''关闭当前的管理员'''
 
-        # self.manager.clearsock(reason="管理员登出或者服务器重启:主动关闭")
         target.clearsock(reason="管理员登出或者由于服务器重启")
+
+    def clear_all_managers(self):
+        '''清空所有的管理员'''
+
+        for manager in self.managers:
+            manager.clearsock(reason="服务器重启,清空所有管理员")
+
 
     def debug(self,tip):
         '''输出到控制台的debug信息'''
@@ -413,7 +419,7 @@ class LMServer(_thread_prototype):
                 self.reboot_flag = True
                 self.logger.save_to_local()
                 self.clearclientsocks()
-                self.shutdown_manager()
+                self.clear_all_managers()
                 self.server_sock.close()
                 manager.send_message(payback(MsgType.RESULT,msg=SUCCESS))
             except Exception as e:
@@ -442,7 +448,6 @@ class LMServer(_thread_prototype):
 
                 _sock = client.get_sock()
                 client.stop();self.workers.remove(client)
-                # self.manager.set_sock(_sock)
                 _tmp_manager = LMManager(self,_sock,debug=DEBUG)
                 _tmp_manager.send_message(payback(MsgType.LOGIN,msg=SUCCESS))
                 self.managers.append(_tmp_manager)
