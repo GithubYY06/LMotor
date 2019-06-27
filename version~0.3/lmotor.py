@@ -201,7 +201,8 @@ class LMManager(_thread_prototype):
         self.debug("本次管理员关闭是由于:{}".format(reason))
         self.time_count = 0
         self.managersock.close()
-        self.server.managers.remove(self)
+        if self in self.server.managers:
+            self.server.managers.remove(self)
         self.stop()
 
     def send_message(self,info):
@@ -450,7 +451,7 @@ class LMServer(_thread_prototype):
                 client.stop();self.workers.remove(client)
                 _tmp_manager = LMManager(self,_sock,debug=DEBUG)
                 _tmp_manager.send_message(payback(MsgType.LOGIN,msg=SUCCESS))
-                self.managers.append(_tmp_manager)
+                # self.managers.append(_tmp_manager)
             else:
                 client.send_message(payback(MsgType.LOGIN,msg=FAILED,reason="invalid account or password"))
 
