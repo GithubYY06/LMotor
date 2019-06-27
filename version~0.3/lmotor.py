@@ -232,7 +232,7 @@ class LMManager(_thread_prototype):
                 else:
                     self.send_message(payback(MsgType.ERROR,reason="invalid message"))
             except ConnectionResetError as e:
-                self.debug("LMotorManager.working:",e)
+                self.debug("LMotorManager.working:" + str(e))
                 self.clearsock(reason="在接受管理员命令的时候遇到了connection_reset_error")
             except json.JSONDecodeError as e:
                 self.send_message(payback(MsgType.ERROR,reason="invalid message"))
